@@ -22,6 +22,42 @@ from typing import (
 
 
 class SurrealDBStore(VectorStore):
+    """
+    SurrealDB as Vector Store.
+
+    To use, you should have the ``surrealdb`` python package installed.
+
+    Args:
+        dburl: SurrealDB connection url
+        embeddings_function: Embedding function to use. (default: HuggingFaceEmbeddings())
+        ns: surrealdb namespace for the vector store. (default: "langchain")
+        db: surrealdb database for the vector store. (default: "database")
+        collection: surrealdb collection for the vector store. (default: "documents")
+
+        (optional) db_user and db_pass: surrealdb credentials
+
+    Example:
+        .. code-block:: python
+
+            from langchain.vectorstores.surrealdb import SurrealDBStore
+            from langchain.embeddings import HuggingFaceEmbeddings
+
+            dburl = "ws://localhost:8000/rpc"
+            embeddings_function = HuggingFaceEmbeddings()
+            ns = "langchain"
+            db = "docstore"
+            collection = "documents"
+            db_user = "root"
+            db_pass = "root"
+
+            sdb = SurrealDBStore.from_texts(
+                    dburl,
+                    texts=texts,
+                    embeddings_function,
+                    ns, db, collection,
+                    db_user=db_user, db_pass=db_pass)
+    """
+
     def __init__(self, dburl: str,
                  embeddings_function: Optional[Embeddings] = HuggingFaceEmbeddings(),
                  ns: str = "langchain",
@@ -37,6 +73,10 @@ class SurrealDBStore(VectorStore):
         self.kwargs = kwargs
 
     async def initialize(self):
+        """
+        Initialize connection to surrealdb database
+        and authenticate if credentials are provided
+        """
         await self.sdb.connect(self.dburl)
         if "db_user" in self.kwargs and "db_pass" in self.kwargs:
             user = self.kwargs.get("db_user")
@@ -59,6 +99,14 @@ class SurrealDBStore(VectorStore):
         metadatas: Optional[List[dict]] = None,
         **kwargs: Any,
     ) -> List[str]:
+        """Add list of text along with embeddings to the vector store asynchronously
+
+        Args:
+            texts (Iterable[str]: collection of text to add to the database
+
+        Returns:
+            List of ids for the newly inserted documents
+        """
         embeddings = self.embeddings_function.embed_documents(texts)
         ids = []
         for idx, text in enumerate(texts):
@@ -78,11 +126,29 @@ class SurrealDBStore(VectorStore):
         metadatas: Optional[List[dict]] = None,
         **kwargs: Any,
     ) -> List[str]:
+        """Add list of text along with embeddings to the vector store
+
+        Args:
+            texts (Iterable[str]: collection of text to add to the database
+
+        Returns:
+            List of ids for the newly inserted documents
+        """
         return asyncio.run(self.aadd_texts(texts, metadatas, **kwargs))
 
     async def _asimilarity_search_by_vector_with_score(
             self, embeddings: List[float], k: int = 4, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
+        """Run similarity search for query embeddings asynchronously
+        and return documents and scores
+
+        Args:
+            embeddings (Lost[float]): Query embeddings.
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar along with scores
+        """
         args = {
             "collection": self.collection,
             "embedding": embeddings,
@@ -108,6 +174,15 @@ class SurrealDBStore(VectorStore):
     async def asimilarity_search_with_relevance_scores(
             self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
+        """Run similarity search asynchronously and return relevance scores
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar along with relevance scores
+        """
         query_embedding = self.embeddings_function.embed_query(query)
         return [(document, similarity) for document, similarity in
                 await self._asimilarity_search_by_vector_with_score(
@@ -116,6 +191,15 @@ class SurrealDBStore(VectorStore):
     def similarity_search_with_relevance_scores(
             self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
+        """Run similarity search synchronously and return relevance scores
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar along with relevance scores
+        """
         async def _similarity_search_with_relevance_scores():
             await self.initialize()
             return await self.asimilarity_search_with_relevance_scores(
@@ -125,6 +209,15 @@ class SurrealDBStore(VectorStore):
     async def asimilarity_search_with_score(
             self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
+        """Run similarity search asynchronously and return distance scores
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar along with relevance distance scores
+        """
         query_embedding = self.embeddings_function.embed_query(query)
         return [(document, similarity) for document, similarity in
                 await self._asimilarity_search_by_vector_with_score(
@@ -132,6 +225,15 @@ class SurrealDBStore(VectorStore):
                 )]
 
     def similarity_search_with_score(self, query: str, k: int = 4, **kwargs):
+        """Run similarity search synchronously and return distance scores
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar along with relevance distance scores
+        """
         async def _similarity_search_with_score():
             await self.initialize()
             return await self.asimilarity_search_with_score(query, k, **kwargs)
@@ -140,6 +242,15 @@ class SurrealDBStore(VectorStore):
     async def asimilarity_search_by_vector(
             self, embeddings: List[float], k: int = 4, **kwargs: Any
     ) -> List[Document]:
+        """Run similarity search on query embeddings asynchronously
+
+        Args:
+            embeddings (List[float]): Query embeddings
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar to the query
+        """
         return [document for document, _ in
                 await self._asimilarity_search_by_vector_with_score(
                     embeddings, k, **kwargs
@@ -147,6 +258,15 @@ class SurrealDBStore(VectorStore):
 
     def similarity_search_by_vector(
             self, embeddings: List[float], k: int = 4, **kwargs: Any):
+        """Run similarity search on query embeddings
+
+        Args:
+            embeddings (List[float]): Query embeddings
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar to the query
+        """
         async def _similarity_search_by_vector():
             await self.initialize()
             return await self.asimilarity_search_by_vector(
@@ -156,6 +276,15 @@ class SurrealDBStore(VectorStore):
     async def asimilarity_search(
         self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Document]:
+        """Run similarity search on query asynchronously
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar to the query
+        """
         query_embedding = self.embeddings_function.embed_query(query)
         return await self.asimilarity_search_by_vector(
                 query_embedding, k, **kwargs)
@@ -163,6 +292,15 @@ class SurrealDBStore(VectorStore):
     def similarity_search(
         self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Document]:
+        """Run similarity search on query
+
+        Args:
+            query (str): Query
+            k (int): Number of results to return. Defaults to 4.
+
+        Returns:
+            List of Documents most similar to the query
+        """
         async def _similarity_search():
             await self.initialize()
             return await self.asimilarity_search(query, k, **kwargs)
@@ -179,6 +317,20 @@ class SurrealDBStore(VectorStore):
         collection: str = "documents",
         **kwargs: Any,
     ) -> 'SurrealDBStore':
+        """Create SurrealDBStore from list of text asynchronously
+
+        Args:
+            dburl (str): SurrealDB connection url
+            texts (List[str]): 
+            embeddings_function (Optional[Embeddings]): Embedding function to use. (default: HuggingFaceEmbeddings())
+            ns (str): surrealdb namespace for the vector store. (default: "langchain")
+            db (str): surrealdb database for the vector store. (default: "database")
+            collection (str): surrealdb collection for the vector store. (default: "documents")
+
+            (optional) db_user and db_pass: surrealdb credentials
+
+        Returns:
+            SurrealDBStore object initialized and ready for use."""
         sdb = cls(dburl, embeddings_function, ns, db, collection, **kwargs)
         await sdb.initialize()
         await sdb.aadd_texts(texts)
@@ -195,6 +347,20 @@ class SurrealDBStore(VectorStore):
         collection: str = "documents",
         **kwargs: Any,
     ) -> 'SurrealDBStore':
+        """Create SurrealDBStore from list of text
+
+        Args:
+            dburl (str): SurrealDB connection url
+            texts (List[str]): 
+            embeddings_function (Optional[Embeddings]): Embedding function to use. (default: HuggingFaceEmbeddings())
+            ns (str): surrealdb namespace for the vector store. (default: "langchain")
+            db (str): surrealdb database for the vector store. (default: "database")
+            collection (str): surrealdb collection for the vector store. (default: "documents")
+
+            (optional) db_user and db_pass: surrealdb credentials
+
+        Returns:
+            SurrealDBStore object initialized and ready for use."""
         sdb = asyncio.run(cls.afrom_texts(dburl, texts, embeddings_function,
                                           ns, db, collection, **kwargs))
         return sdb
