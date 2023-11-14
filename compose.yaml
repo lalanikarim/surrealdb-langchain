@@ -1,0 +1,15 @@
+services:
+  surreal:
+    image: docker.io/surrealdb/surrealdb:1.0.0
+    volumes:
+      - ./db:/db
+    ports: 
+      - "8000:8000"
+    command:
+      - "start"
+      - "--auth"
+      - "--user" 
+      - "${ROOTUSER:-root}"
+      - "--pass" 
+      - "${ROOTPASSWORD:-password}"
+      - "file:/db/surreal.db"
