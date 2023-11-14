@@ -33,7 +33,6 @@ class SurrealDBStore(VectorStore):
         self.db = db
         self.dburl = dburl
         self.embeddings_function = embeddings_function
-        self.score_threshold = kwargs.get("score_threshold", 0.7)
         self.sdb = Surreal()
         self.kwargs = kwargs
 
@@ -81,24 +80,85 @@ class SurrealDBStore(VectorStore):
     ) -> List[str]:
         return asyncio.run(self.aadd_texts(texts, metadatas, **kwargs))
 
+    async def _asimilarity_search_by_vector_with_score(
+            self, embeddings: List[float], k: int = 4, **kwargs: Any
+    ) -> List[Tuple[Document, float]]:
+        args = {
+            "collection": self.collection,
+            "embedding": embeddings,
+            "k": k
+        }
+        query = '''select id, text,
+        vector::similarity::cosine(embedding,{embedding}) as similarity
+        from {collection}
+        order by similarity desc LIMIT {k}
+        '''.format(**args)
+
+        results = await self.sdb.query(query)
+
+        return [
+            (Document(
+                page_content=result["text"],
+                metadata={"id": result["id"]}
+            ), result["similarity"]) for result in results[0]["result"]
+        ]
+
+    async def asimilarity_search_with_relevance_scores(
+            self, query: str, k: int = 4, **kwargs: Any
+    ) -> List[Tuple[Document, float]]:
+        query_embedding = self.embeddings_function.embed_query(query)
+        score_threshold = kwargs.get("score_threshold", 0)
+        return [(document, similarity) for document, similarity in
+                await self._asimilarity_search_by_vector_with_score(
+                    query_embedding, k, **kwargs)
+                if similarity >= score_threshold]
+
+    def similarity_search_with_relevance_scores(
+            self, query: str, k: int = 4, **kwargs: Any
+    ) -> List[Tuple[Document, float]]:
+        async def _similarity_search_with_relevance_scores():
+            await self.initialize()
+            return await self.asimilarity_search_with_relevance_scores(
+                    query, k, **kwargs)
+        return asyncio.run(_similarity_search_with_relevance_scores())
+
+    async def asimilarity_search_with_score(
+            self, query: str, k: int = 4, **kwargs: Any
+    ) -> List[Tuple[Document, float]]:
+        query_embedding = self.embeddings_function.embed_query(query)
+        return [(document, similarity) for document, similarity in
+                await self._asimilarity_search_by_vector_with_score(
+                    query_embedding, k, **kwargs
+                )]
+
+    def similarity_search_with_score(self, query: str, k: int = 4, **kwargs):
+        async def _similarity_search_with_score():
+            await self.initialize()
+            return await self.asimilarity_search_with_score(query, k, **kwargs)
+        return asyncio.run(_similarity_search_with_score())
+
+    async def asimilarity_search_by_vector(
+            self, embeddings: List[float], k: int = 4, **kwargs: Any
+    ) -> List[Document]:
+        return [document for document, _ in
+                await self._asimilarity_search_by_vector_with_score(
+                    embeddings, k, **kwargs
+                )]
+
+    def similarity_search_by_vector(
+            self, embeddings: List[float], k: int = 4, **kwargs: Any):
+        async def _similarity_search_by_vector():
+            await self.initialize()
+            return await self.asimilarity_search_by_vector(
+                    embeddings, k, **kwargs)
+        return asyncio.run(_similarity_search_by_vector())
+
     async def asimilarity_search(
         self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Document]:
         query_embedding = self.embeddings_function.embed_query(query)
-        results = await self.sdb.query(
-            f"select id, text, vector::similarity::cosine(embedding,$embedding) as similarity from {self.collection} order by similarity desc LIMIT $k",
-            {
-                "embedding": query_embedding,
-                "k": k
-            }
-        )
-        return [
-            Document(
-                page_content=result["text"],
-                metadata={"id": result["id"]}
-            ) for result in results[0]["result"]
-            if result["similarity"] >= self.score_threshold
-        ]
+        return await self.asimilarity_search_by_vector(
+                query_embedding, k, **kwargs)
 
     def similarity_search(
         self, query: str, k: int = 4, **kwargs: Any
