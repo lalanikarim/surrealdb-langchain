@@ -86,11 +86,13 @@ class SurrealDBStore(VectorStore):
         args = {
             "collection": self.collection,
             "embedding": embeddings,
-            "k": k
+            "k": k,
+            "score_threshold": kwargs.get("score_threshold", 0)
         }
         query = '''select id, text,
         vector::similarity::cosine(embedding,{embedding}) as similarity
         from {collection}
+        where vector::similarity::cosine(embedding,{embedding}) >= {score_threshold}
         order by similarity desc LIMIT {k}
         '''.format(**args)
 
@@ -107,11 +109,9 @@ class SurrealDBStore(VectorStore):
             self, query: str, k: int = 4, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
         query_embedding = self.embeddings_function.embed_query(query)
-        score_threshold = kwargs.get("score_threshold", 0)
         return [(document, similarity) for document, similarity in
                 await self._asimilarity_search_by_vector_with_score(
-                    query_embedding, k, **kwargs)
-                if similarity >= score_threshold]
+                    query_embedding, k, **kwargs)]
 
     def similarity_search_with_relevance_scores(
             self, query: str, k: int = 4, **kwargs: Any
